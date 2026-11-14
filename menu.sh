@@ -14,7 +14,9 @@ LANGUAGE_FILE="${BYPASS_DIR}/language"
 HCR_PORT="8880"
 HCR_SERVICE="hcr-8880.service"
 HCR_SSH_TARGET="127.0.0.1:22"
-HCR_DOWNLOAD_POLL_TIMEOUT="120s"
+# O hcr-server 0.1.29 rejeita valores acima do timeout interno de I/O.
+# 30s é aceito e amplia a janela padrão de 25s sem invalidar a unit.
+HCR_DOWNLOAD_POLL_TIMEOUT="30s"
 HCR_BINARY_CANDIDATES=("${BYPASS_DIR}/hcr-server" "/opt/hcr-server/hcr-server" "/usr/local/bin/hcr-server" "/usr/bin/hcr-server")
 # Fonte pública do binário oficial hcr-server (Linux amd64). Pode ser trocada
 # exportando HCR_SOURCE_URL antes de abrir o menu.
@@ -587,7 +589,7 @@ hcr_apply_download_frame_tuning() {
     [[ "$HAS_FRAME" == true || "$HAS_POLL" == true ]] || return 0
     grep -Eq '^[[:space:]]*ExecStart=.*hcr-server' "$SERVICE_FILE" || return 0
     if [[ "$HAS_FRAME" == true ]] && grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" &&
-        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+120s([[:space:]]|$)' "$SERVICE_FILE"; }; then
+        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+30s([[:space:]]|$)' "$SERVICE_FILE"; }; then
         return 0
     fi
 
@@ -599,12 +601,12 @@ hcr_apply_download_frame_tuning() {
         sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-download-frame 16384/' "$SERVICE_FILE"
     fi
     if [[ "$HAS_POLL" == true ]] && grep -Eq '^[[:space:]]*ExecStart=.*download-poll-timeout([=[:space:]]|$)' "$SERVICE_FILE"; then
-        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}download-poll-timeout)=([^[:space:]]+)/\1 120s/; s/(-{1,2}download-poll-timeout)[[:space:]]+[^[:space:]]+/\1 120s/; }' "$SERVICE_FILE"
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}download-poll-timeout)=([^[:space:]]+)/\1 30s/; s/(-{1,2}download-poll-timeout)[[:space:]]+[^[:space:]]+/\1 30s/; }' "$SERVICE_FILE"
     elif [[ "$HAS_POLL" == true ]]; then
-        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -download-poll-timeout 120s/' "$SERVICE_FILE"
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -download-poll-timeout 30s/' "$SERVICE_FILE"
     fi
     if { [[ "$HAS_FRAME" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE"; } &&
-        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+120s([[:space:]]|$)' "$SERVICE_FILE"; } &&
+        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+30s([[:space:]]|$)' "$SERVICE_FILE"; } &&
         systemctl daemon-reload >/dev/null 2>&1; then
         echo -e "${GREEN}Tuning HCR aplicado: polling de download em ${HCR_DOWNLOAD_POLL_TIMEOUT} e frame em 16 KiB; unit anterior salva em ${BACKUP}.${NC}"
         return 0

@@ -547,7 +547,7 @@ hcr_exec_args() {
 
     HELP=$(timeout 5 "$BINARY" -h 2>&1 </dev/null) || true
     if grep -q -- "-max-download-frame" <<<"$HELP"; then
-        FRAME_ARGS=" -max-download-frame 65536"
+        FRAME_ARGS=" -max-download-frame 16384"
     fi
     if grep -q -- "-listen" <<<"$HELP"; then
         printf '%s' "-listen :${PORT} -target ${HCR_SSH_TARGET} -transport plain${FRAME_ARGS}"
@@ -560,7 +560,7 @@ hcr_alternate_args() {
     local ARGS="$1" PORT="$2" FRAME_ARGS=""
 
     if [[ "$ARGS" == *"-max-download-frame"* ]]; then
-        FRAME_ARGS=" -max-download-frame 65536"
+        FRAME_ARGS=" -max-download-frame 16384"
     fi
 
     if [[ "$ARGS" == -listen* ]]; then
@@ -577,20 +577,20 @@ hcr_apply_download_frame_tuning() {
     HELP=$(timeout 5 "$BINARY" -h 2>&1 </dev/null) || true
     grep -q -- "-max-download-frame" <<<"$HELP" || return 0
     grep -Eq '^[[:space:]]*ExecStart=.*hcr-server' "$SERVICE_FILE" || return 0
-    grep -Eq '^[[:space:]]*ExecStart=.*max-download-frame([=[:space:]]|$)' "$SERVICE_FILE" && return 0
+    grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" && return 0
 
     BACKUP="${SERVICE_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
     cp -a -- "$SERVICE_FILE" "$BACKUP" || return 1
-    if ! sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { /max-download-frame/! s/[[:space:]]*$/ -max-download-frame 65536/; }' "$SERVICE_FILE"; then
+    if grep -Eq '^[[:space:]]*ExecStart=.*max-download-frame([=[:space:]]|$)' "$SERVICE_FILE"; then
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}max-download-frame)=([0-9]+)/\1 16384/; s/(-{1,2}max-download-frame)[[:space:]]+[0-9]+/\1 16384/; }' "$SERVICE_FILE"
+    else
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-download-frame 16384/' "$SERVICE_FILE"
+    fi
+    if ! grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" || ! systemctl daemon-reload >/dev/null 2>&1; then
         cp -a -- "$BACKUP" "$SERVICE_FILE"
         return 1
     fi
-    if ! grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+65536([[:space:]]|$)' "$SERVICE_FILE" || ! systemctl daemon-reload >/dev/null 2>&1; then
-        cp -a -- "$BACKUP" "$SERVICE_FILE"
-        systemctl daemon-reload >/dev/null 2>&1 || true
-        return 1
-    fi
-    echo -e "${GREEN}Blocos de download HCR ajustados para até 64 KiB; unit anterior salva em ${BACKUP}.${NC}"
+    echo -e "${GREEN}Blocos de download HCR definidos em 16 KiB para maior compatibilidade; unit anterior salva em ${BACKUP}.${NC}"
     return 0
 }
 

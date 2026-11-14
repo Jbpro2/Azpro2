@@ -1097,8 +1097,9 @@ toggle_port_multiprotocol() {
 }
 
 toggle_port_hcr() {
-    local PORT="$1" SERVICE="proxy-${1}.service" FLAG PREVIOUS_HCR=false CONFIRM=""
+    local PORT="$1" SERVICE="proxy-${1}.service" FLAG MULTI_FLAG PREVIOUS_HCR=false PREVIOUS_MULTI=false CONFIRM=""
     FLAG=$(hcr_flag_for_port "$PORT")
+    MULTI_FLAG=$(multiprotocol_flag_for_port "$PORT")
     systemctl is-active --quiet "$SERVICE" 2>/dev/null || {
         echo -e "${RED}A porta ${PORT} não está mais ativa.${NC}"
         read -r -p "Enter para continuar..." _
@@ -1110,6 +1111,7 @@ toggle_port_hcr() {
     mkdir -p "$BYPASS_DIR" || return 1
 
     [[ -f "$FLAG" ]] && PREVIOUS_HCR=true
+    [[ -f "$MULTI_FLAG" ]] && PREVIOUS_MULTI=true
     if [[ "$PREVIOUS_HCR" == true ]]; then
         rm -f -- "$FLAG" || return 1
     else
@@ -1122,19 +1124,33 @@ toggle_port_hcr() {
             echo -e "${RED}Não foi possível gravar a configuração HCR da porta ${PORT}.${NC}"
             return 1
         fi
+        # HCR é roteado pelo dispatcher multiprotocolo. Sem este marcador,
+        # portas como 80/8080 continuam no fluxo HTTP legado e o cliente
+        # falha no handshake, entrando em reconexão contínua.
+        if [[ "$PREVIOUS_MULTI" != true ]] && ! touch "$MULTI_FLAG"; then
+            echo -e "${RED}Não foi possível ativar o multiprotocolo na porta ${PORT}.${NC}"
+            rm -f -- "$FLAG"
+            read -r -p "Enter para continuar..." _
+            return 1
+        fi
     fi
 
     if systemctl restart "$SERVICE" 2>/dev/null; then
         if [[ "$PREVIOUS_HCR" == true ]]; then
             echo -e "${YELLOW}HCR desativado na porta ${PORT}.${NC}"
         else
-            echo -e "${GREEN}Suporte HCR marcado ON na porta ${PORT}; o estado do multiprotocolo foi preservado.${NC}"
+            echo -e "${GREEN}HCR ativado na porta ${PORT}; multiprotocolo habilitado para fazer o roteamento.${NC}"
         fi
     else
         if [[ "$PREVIOUS_HCR" == true ]]; then
             touch "$FLAG"
         else
             rm -f -- "$FLAG"
+        fi
+        if [[ "$PREVIOUS_MULTI" == true ]]; then
+            touch "$MULTI_FLAG"
+        else
+            rm -f -- "$MULTI_FLAG"
         fi
         systemctl restart "$SERVICE" >/dev/null 2>&1 || true
         echo -e "${RED}Falha ao reiniciar ${SERVICE}; configuração anterior restaurada.${NC}"

@@ -1,5 +1,11 @@
 # Mpro - Changelog
 
+## Próxima versão - HCR na opção 7/H
+
+### Corrigido
+- A tecla H agora ativa automaticamente o multiprotocolo na porta selecionada antes de habilitar o roteamento HCR, evitando que portas como 80 e 8080 permaneçam no fluxo HTTP legado e provoquem reconexões.
+- Ao desativar HCR, o estado anterior do multiprotocolo é preservado; se o restart falhar, os marcadores HCR e multiprotocolo são restaurados juntos.
+
 ## v3.9.3 - Estabilidade HCR em redes móveis
 
 ### Corrigido

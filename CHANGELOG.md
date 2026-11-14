@@ -5,6 +5,7 @@
 ### Corrigido
 - A tecla H agora ativa automaticamente o multiprotocolo na porta selecionada antes de habilitar o roteamento HCR, evitando que portas como 80 e 8080 permaneçam no fluxo HTTP legado e provoquem reconexões.
 - Ao desativar HCR, o estado anterior do multiprotocolo é preservado; se o restart falhar, os marcadores HCR e multiprotocolo são restaurados juntos.
+- O serviço HCR agora usa `-download-poll-timeout 120s`; o padrão de 25 segundos do servidor oficial causava `SocketException` e reconexões periódicas em sessões sem tráfego de download.
 
 ## v3.9.3 - Estabilidade HCR em redes móveis
 

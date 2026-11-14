@@ -14,6 +14,7 @@ LANGUAGE_FILE="${BYPASS_DIR}/language"
 HCR_PORT="8880"
 HCR_SERVICE="hcr-8880.service"
 HCR_SSH_TARGET="127.0.0.1:22"
+HCR_DOWNLOAD_POLL_TIMEOUT="120s"
 HCR_BINARY_CANDIDATES=("${BYPASS_DIR}/hcr-server" "/opt/hcr-server/hcr-server" "/usr/local/bin/hcr-server" "/usr/bin/hcr-server")
 # Fonte pública do binário oficial hcr-server (Linux amd64). Pode ser trocada
 # exportando HCR_SOURCE_URL antes de abrir o menu.
@@ -543,55 +544,75 @@ hcr_ensure_binary() {
 
 # Descobre o formato de argumentos aceito pelo binário instalado.
 hcr_exec_args() {
-    local PORT="$1" BINARY="$2" HELP="" FRAME_ARGS=""
+    local PORT="$1" BINARY="$2" HELP="" FRAME_ARGS="" POLL_ARGS=""
 
     HELP=$(timeout 5 "$BINARY" -h 2>&1 </dev/null) || true
     if grep -q -- "-max-download-frame" <<<"$HELP"; then
         FRAME_ARGS=" -max-download-frame 16384"
     fi
+    if grep -q -- "-download-poll-timeout" <<<"$HELP"; then
+        POLL_ARGS=" -download-poll-timeout ${HCR_DOWNLOAD_POLL_TIMEOUT}"
+    fi
     if grep -q -- "-listen" <<<"$HELP"; then
-        printf '%s' "-listen :${PORT} -target ${HCR_SSH_TARGET} -transport plain${FRAME_ARGS}"
+        printf '%s' "-listen :${PORT} -target ${HCR_SSH_TARGET} -transport plain${FRAME_ARGS}${POLL_ARGS}"
     else
-        printf '%s' "--port ${PORT} --transport plain${FRAME_ARGS}"
+        printf '%s' "--port ${PORT} --transport plain${FRAME_ARGS}${POLL_ARGS}"
     fi
 }
 
 hcr_alternate_args() {
-    local ARGS="$1" PORT="$2" FRAME_ARGS=""
+    local ARGS="$1" PORT="$2" FRAME_ARGS="" POLL_ARGS=""
 
     if [[ "$ARGS" == *"-max-download-frame"* ]]; then
         FRAME_ARGS=" -max-download-frame 16384"
     fi
+    if [[ "$ARGS" == *"-download-poll-timeout"* ]]; then
+        POLL_ARGS=" -download-poll-timeout ${HCR_DOWNLOAD_POLL_TIMEOUT}"
+    fi
 
     if [[ "$ARGS" == -listen* ]]; then
-        printf '%s' "--port ${PORT} --transport plain${FRAME_ARGS}"
+        printf '%s' "--port ${PORT} --transport plain${FRAME_ARGS}${POLL_ARGS}"
     else
-        printf '%s' "-listen :${PORT} -target ${HCR_SSH_TARGET} -transport plain${FRAME_ARGS}"
+        printf '%s' "-listen :${PORT} -target ${HCR_SSH_TARGET} -transport plain${FRAME_ARGS}${POLL_ARGS}"
     fi
 }
 
 hcr_apply_download_frame_tuning() {
-    local BINARY="$1" SERVICE_FILE="$2" HELP="" BACKUP=""
+    local BINARY="$1" SERVICE_FILE="$2" HELP="" BACKUP="" HAS_FRAME=false HAS_POLL=false
 
     [[ -x "$BINARY" && -f "$SERVICE_FILE" ]] || return 0
     HELP=$(timeout 5 "$BINARY" -h 2>&1 </dev/null) || true
-    grep -q -- "-max-download-frame" <<<"$HELP" || return 0
+    grep -q -- "-max-download-frame" <<<"$HELP" && HAS_FRAME=true
+    grep -q -- "-download-poll-timeout" <<<"$HELP" && HAS_POLL=true
+    [[ "$HAS_FRAME" == true || "$HAS_POLL" == true ]] || return 0
     grep -Eq '^[[:space:]]*ExecStart=.*hcr-server' "$SERVICE_FILE" || return 0
-    grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" && return 0
+    if [[ "$HAS_FRAME" == true ]] && grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" &&
+        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+120s([[:space:]]|$)' "$SERVICE_FILE"; }; then
+        return 0
+    fi
 
     BACKUP="${SERVICE_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
     cp -a -- "$SERVICE_FILE" "$BACKUP" || return 1
-    if grep -Eq '^[[:space:]]*ExecStart=.*max-download-frame([=[:space:]]|$)' "$SERVICE_FILE"; then
+    if [[ "$HAS_FRAME" == true ]] && grep -Eq '^[[:space:]]*ExecStart=.*max-download-frame([=[:space:]]|$)' "$SERVICE_FILE"; then
         sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}max-download-frame)=([0-9]+)/\1 16384/; s/(-{1,2}max-download-frame)[[:space:]]+[0-9]+/\1 16384/; }' "$SERVICE_FILE"
-    else
+    elif [[ "$HAS_FRAME" == true ]]; then
         sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-download-frame 16384/' "$SERVICE_FILE"
     fi
-    if ! grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE" || ! systemctl daemon-reload >/dev/null 2>&1; then
+    if [[ "$HAS_POLL" == true ]] && grep -Eq '^[[:space:]]*ExecStart=.*download-poll-timeout([=[:space:]]|$)' "$SERVICE_FILE"; then
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}download-poll-timeout)=([^[:space:]]+)/\1 120s/; s/(-{1,2}download-poll-timeout)[[:space:]]+[^[:space:]]+/\1 120s/; }' "$SERVICE_FILE"
+    elif [[ "$HAS_POLL" == true ]]; then
+        sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -download-poll-timeout 120s/' "$SERVICE_FILE"
+    fi
+    if { [[ "$HAS_FRAME" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-max-download-frame[[:space:]]+16384([[:space:]]|$)' "$SERVICE_FILE"; } &&
+        { [[ "$HAS_POLL" != true ]] || grep -Eq '^[[:space:]]*ExecStart=.*-download-poll-timeout[[:space:]]+120s([[:space:]]|$)' "$SERVICE_FILE"; } &&
+        systemctl daemon-reload >/dev/null 2>&1; then
+        echo -e "${GREEN}Tuning HCR aplicado: polling de download em ${HCR_DOWNLOAD_POLL_TIMEOUT} e frame em 16 KiB; unit anterior salva em ${BACKUP}.${NC}"
+        return 0
+    else
         cp -a -- "$BACKUP" "$SERVICE_FILE"
+        systemctl daemon-reload >/dev/null 2>&1 || true
         return 1
     fi
-    echo -e "${GREEN}Blocos de download HCR definidos em 16 KiB para maior compatibilidade; unit anterior salva em ${BACKUP}.${NC}"
-    return 0
 }
 
 hcr_port_busy() {
